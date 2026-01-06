@@ -172,18 +172,19 @@ void AdmittanceController::update(const Eigen::VectorXd &external_torque,
         J_dot_.setZero();
         J_prev_ = J_;
     } else {
-        // Finite difference approximation for J_dot:
+        // Finite difference approximation for J_dot
         // J_dot ≈ (J_current - J_prev) / dt
-        // More accurate would be: pinocchio::computeJointJacobiansTimeVariation:
+        // More accurate would be: pinocchio::computeJointJacobiansTimeVariation
+        J_dot_ = (J_ - J_prev_) / dt;
         J_prev_ = J_;
-    }:
+    }
 
-    // 4. Compute task space velocity: x_dot = J * q_dot:
+    // 4. Compute task space velocity: x_dot = J * q_dot
     x_dot_ = J_ * q_dot_;
-    :
+
     // 5. Convert external torque to task space force
-    // f_ext = J^{+T} * tau_ext:
-    // Compute pseudo-inverse of J:
+    // f_ext = J^{+T} * tau_ext
+    // Compute pseudo-inverse of J
     Eigen::JacobiSVD<Eigen::MatrixXd> svd(
         J_,
         Eigen::ComputeThinU | Eigen::ComputeThinV);
