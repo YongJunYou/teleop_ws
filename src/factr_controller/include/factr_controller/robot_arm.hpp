@@ -25,6 +25,7 @@ private:
     std::vector<int> dxl_ids_all_ = {1, 2, 3, 4, 5, 6, 7};
 
     std::optional<DynamixelSdkInterface> dxl_;
+    bool first_loop = true;
 
     ExternalTorqueEstimator estimator_;
     AdmittanceController admittance_;

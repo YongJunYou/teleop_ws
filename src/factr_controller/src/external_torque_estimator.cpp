@@ -124,15 +124,15 @@ void ExternalTorqueEstimator::update(const DynamixelSdkInterface::State &state,
     // 2. DOB용 filtered state 정의 q,p
     const Eigen::Index nv_e = static_cast<Eigen::Index>(nv);
 
-    Eigen::VectorXd q_filtered     = q_dob_.segment(0,       nv_e);   // 벡터상단 
-    Eigen::VectorXd q_dot_filtered = q_dob_.segment(nv_e,    nv_e);   // 벡터하단 
+    Eigen::VectorXd q_filtered     = q_dob_.segment(0,       nv_e);   // 벡터상단
+    Eigen::VectorXd q_dot_filtered = q_dob_.segment(nv_e,    nv_e);   // 벡터하단
     Eigen::VectorXd p_filtered     = p_dob_.segment(0,       nv_e);
     Eigen::VectorXd p_dot_filtered = p_dob_.segment(nv_e,    nv_e);
 
     Eigen::VectorXd inv_eps  = eps_dob_.cwiseInverse(); // ε^-1
     Eigen::VectorXd inv_eps2 = inv_eps.cwiseProduct(inv_eps); // ε^-2
 
-    Eigen::VectorXd Minv_tau = M.ldlt().solve(tau); // M^{-1}(q) * τ 
+    Eigen::VectorXd Minv_tau = M.ldlt().solve(tau); // M^{-1}(q) * τ
 
     // ========================================================================================
 

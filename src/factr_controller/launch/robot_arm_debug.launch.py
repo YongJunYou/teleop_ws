@@ -7,7 +7,7 @@ import os
 def generate_launch_description():
     # 패키지의 share 디렉토리 경로 가져오기
     package_share_directory = get_package_share_directory('factr_controller')
-    
+
     # YAML 파라미터 파일 경로
     config_file = os.path.join(
         package_share_directory,
@@ -21,7 +21,7 @@ def generate_launch_description():
         name='robot_arm',
         parameters=[config_file],
         output='screen',
-        prefix='gdb -ex run --args'  # GDB로 실행
+        prefix=["gdbserver localhost:3000"]  # GDB로 실행
     )
     
     return LaunchDescription([

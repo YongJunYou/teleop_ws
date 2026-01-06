@@ -34,7 +34,7 @@ DynamixelSdkInterface::DynamixelSdkInterface(
     lower_bound_unit_[i] = static_cast<int32_t>(lower_deg[i] * DEG2UNIT_LOCAL);
     upper_bound_unit_[i] = static_cast<int32_t>(upper_deg[i] * DEG2UNIT_LOCAL);
   }
-  
+
   // ===== control table (MATLAB과 동일) =====
   addr_torque_enable_        = 64;
   addr_operating_mode_       = 11;
@@ -118,7 +118,7 @@ void DynamixelSdkInterface::initMotors()
         port_handler_, id, addr_operating_mode_, mode_a_, &dxl_error);
   }
 
-  // TYPE B: operating mode 
+  // TYPE B: operating mode
   for (auto id : type_b_ids_) {
     packet_handler_->write1ByteTxRx(
         port_handler_, id, addr_operating_mode_, mode_b_, &dxl_error);

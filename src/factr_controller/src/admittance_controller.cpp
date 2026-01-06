@@ -153,11 +153,11 @@ void AdmittanceController::update(const Eigen::VectorXd &external_torque,
     // 2. Compute forward kinematics and Jacobian
     pinocchio::forwardKinematics(model_, data_, q_);
     pinocchio::framesForwardKinematics(model_, data_, q_);
-    
+
     // Get end-effector pose
     const pinocchio::SE3 &T_ee = data_.oMf[end_effector_frame_id_];
     x_.head<3>() = T_ee.translation();
-    
+
     // Convert rotation matrix to axis-angle representation for orientation
     // R = exp([w]_×) where w is the axis-angle vector
     Eigen::Matrix3d R = T_ee.rotation();
@@ -175,7 +175,7 @@ void AdmittanceController::update(const Eigen::VectorXd &external_torque,
         // Finite difference approximation for J_dot
         // J_dot ≈ (J_current - J_prev) / dt
         // More accurate would be: pinocchio::computeJointJacobiansTimeVariation
-        J_dot_ = (J_ - J_prev_) / dt;
+        J_dot_ = (J_ - J_prev_) / dt;   //------------------------------------------------> 범인 유력
         J_prev_ = J_;
     }
 
@@ -212,7 +212,7 @@ void AdmittanceController::update(const Eigen::VectorXd &external_torque,
     f_ext_ = J_pinv_.transpose() * external_torque;
 
     // 6. Compute desired task space acceleration
-    x_des_dot_dot_ = Md_.inverse() * (f_ext_ - Dd_ * x_dot_ - Kd_ * (x_ - x0_));
+    x_des_dot_dot_ = Md_.inverse() * (f_ext_ - Dd_ * x_dot_ - Kd_ * (x_ - x0_)); // x를 구해서  x->q 로 변환하면 된다.
 
     // 7. Convert to desired joint acceleration
     q_dot_dot_des_ = J_pinv_ * (x_des_dot_dot_ - J_dot_ * q_dot_);
@@ -222,6 +222,8 @@ void AdmittanceController::update(const Eigen::VectorXd &external_torque,
     {
         q_des_ = q_;
         q_dot_des_ = Eigen::VectorXd::Zero(7);
+        // Eigen::VectorXd q_dot_des_prev = q_dot_des_;
+        // Eigen::VectorXd q_des_prev = q_des_;
         first_update_ = false;
     }
     else
