@@ -6,6 +6,8 @@
 
 #include <pinocchio/algorithm/rnea.hpp>
 #include <pinocchio/algorithm/compute-all-terms.hpp>
+#include <pinocchio/algorithm/kinematics.hpp>
+#include <pinocchio/algorithm/frames.hpp>
 #include <pinocchio/parsers/urdf.hpp>
 
 #include "factr_controller/dynamixel_sdk_interface.hpp"
@@ -22,10 +24,14 @@ public:
 
     Eigen::VectorXd getExternalTorque() const;
 
+    // Get current end-effector position (translation x, y, z in meters)
+    Eigen::Vector3d getEndEffectorPosition(const DynamixelSdkInterface::State &state) const;
+
 private:
     pinocchio::Model model_;
     pinocchio::Data  data_;
     bool model_ready_;
+    pinocchio::FrameIndex end_effector_frame_id_;
     Eigen::VectorXd tau_ext_hat_;   // DOB가 추정한 외력 토크 \hat{\tau}_{ext}
 
     // === DOB 내부 상태 ===

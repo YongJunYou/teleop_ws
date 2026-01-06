@@ -61,6 +61,14 @@ void ExternalTorqueEstimator::initializeModel()
         tau_ext_hat_.resize(model_.nv);
         tau_ext_hat_.setZero();
 
+        // Find end-effector frame (link_7)
+        if (model_.existFrame("link_7")) {
+            end_effector_frame_id_ = model_.getFrameId("link_7");
+        } else {
+            // If frame doesn't exist, use the last joint frame
+            end_effector_frame_id_ = model_.nframes - 1;
+        }
+
         model_ready_ = true;
         std::cout << "[ExternalTorqueEstimator]"
                   << "\033[32m" << " Loaded URDF SUCCESS" << "\033[0m"
@@ -174,6 +182,35 @@ void ExternalTorqueEstimator::update(const DynamixelSdkInterface::State &state,
 Eigen::VectorXd ExternalTorqueEstimator::getExternalTorque() const
 {
     return tau_ext_hat_;
+}
+
+Eigen::Vector3d ExternalTorqueEstimator::getEndEffectorPosition(const DynamixelSdkInterface::State &state) const
+{
+    if (!model_ready_) {
+        return Eigen::Vector3d::Zero();
+    }
+
+    const std::size_t nv = model_.nv;
+    const std::size_t nmeas = std::min<std::size_t>(nv, state.position.size());
+    if (nmeas == 0) {
+        return Eigen::Vector3d::Zero();
+    }
+
+    // Convert joint positions from units to radians
+    Eigen::VectorXd q(model_.nq);
+    for (std::size_t i = 0; i < nmeas; ++i) {
+        const auto idx = static_cast<Eigen::Index>(i);
+        q(idx) = static_cast<double>(state.position[i]) * DynamixelSdkInterface::UNIT2RAD;
+    }
+
+    // Compute forward kinematics
+    pinocchio::Data data_temp(model_);
+    pinocchio::forwardKinematics(model_, data_temp, q);
+    pinocchio::framesForwardKinematics(model_, data_temp, q); /// check
+
+    // Get end-effector position
+    const pinocchio::SE3 &T_ee = data_temp.oMf[end_effector_frame_id_];
+    return T_ee.translation();
 }
 
 double ExternalTorqueEstimator::currentToTorque(std::size_t joint_index,

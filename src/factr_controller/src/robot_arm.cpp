@@ -1,6 +1,8 @@
 #include "factr_controller/robot_arm.hpp"
 #include <sstream>
 #include <cmath>
+#include <thread>
+#include <chrono>
 
 RobotArm::RobotArm()
 : Node("robot_arm"),
@@ -11,11 +13,26 @@ RobotArm::RobotArm()
     this->declare_parameter<std::string>("device_name", "/dev/ttyUSB0");
     this->declare_parameter<int>("baudrate", 4000000);
     this->declare_parameter<double>("protocol_version", 2.0);
+    
+    // 초기 관절 위치 파라미터 선언 (YAML 파일에서 로드)
+    std::vector<double> default_initial_positions = {180.0, 180.0, 180.0, 270.0, 180.0, 180.0, 180.0};
+    this->declare_parameter<std::vector<double>>("initial_joint_positions", default_initial_positions);
+    
+    // Reference position 파라미터 선언 (YAML 파일에서 로드)
+    this->declare_parameter<double>("reference_position.x", 0.06);
+    this->declare_parameter<double>("reference_position.y", 0.0);
+    this->declare_parameter<double>("reference_position.z", 0.2);
 
     // 파라미터 읽기
     std::string device_name = this->get_parameter("device_name").as_string();
     int baudrate = this->get_parameter("baudrate").as_int();
     double protocol_version = this->get_parameter("protocol_version").as_double();
+    
+    // Reference position 파라미터 읽기 및 설정
+    double ref_x = this->get_parameter("reference_position.x").as_double();
+    double ref_y = this->get_parameter("reference_position.y").as_double();
+    double ref_z = this->get_parameter("reference_position.z").as_double();
+    admittance_.setReferencePosition(ref_x, ref_y, ref_z);
 
     // DynamixelSdkInterface를 파라미터 값으로 초기화
     dxl_.emplace(device_name, baudrate, protocol_version);
@@ -25,16 +42,30 @@ RobotArm::RobotArm()
         "joint_states", 10);
     external_torque_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
         "external_torque", 10);
+    external_force_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
+        "external_force", 10);
+    jacobian_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>(
+        "jacobian", 10);
+    end_effector_position_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>(
+        "end_effector_position", 10);
 
     RCLCPP_INFO(this->get_logger(), "RobotArm created.");
     RCLCPP_INFO(this->get_logger(), "Dynamixel device: %s @ %d baud", 
                 device_name.c_str(), baudrate);
     RCLCPP_INFO(this->get_logger(), "Publishing joint states to topic: joint_states");
     RCLCPP_INFO(this->get_logger(), "Publishing external torque to topic: external_torque");
+    RCLCPP_INFO(this->get_logger(), "Publishing external force to topic: external_force");
+    RCLCPP_INFO(this->get_logger(), "Publishing Jacobian to topic: jacobian");
+    RCLCPP_INFO(this->get_logger(), "Publishing end-effector position to topic: end_effector_position");
 }
 
 void RobotArm::run()
 {
+    RCLCPP_INFO(this->get_logger(), "Moving to initial position...");
+    moveToInitialPosition();
+    
+    RCLCPP_INFO(this->get_logger(), "Waiting 10 seconds before starting control loop...");
+    std::this_thread::sleep_for(std::chrono::seconds(10));
     RCLCPP_INFO(this->get_logger(), "Starting control loop...");
 
     last_time_ = this->now();
@@ -63,6 +94,7 @@ void RobotArm::run()
         
         // ROS2 topic으로 발행
         publishJointState(dxl_state);
+        publishEndEffectorPosition(dxl_state);
         
         // 디버그 출력
         //debugDynamixelState(dxl_state);
@@ -78,28 +110,35 @@ void RobotArm::run()
         //debugExternalTorque(tau_ext);
         
         // 3. 제어기
-       //  admittance_.update(tau_ext, dxl_state, dt);
+        admittance_.update(tau_ext, dxl_state, dt);
+        
+        // External force 발행
+        const Eigen::VectorXd f_ext = admittance_.getExternalForce();
+        publishExternalForce(f_ext);
+        
+        // Jacobian 발행
+        const Eigen::MatrixXd J = admittance_.getJacobian();
+        publishJacobian(J);
         
         // 4. 제어기 출력 가져오기
-        // const Eigen::VectorXd q_d = admittance_.getDesiredJointPosition();
+        const Eigen::VectorXd q_d = admittance_.getDesiredJointPosition();
         
-        // 5. Dynamixel에 쓰기 (radian을 unit으로 변환)
-        // if (q_d.size() == static_cast<Eigen::Index>(dxl_state.position.size())) {
-        //     std::vector<int32_t> q_d_unit(q_d.size());
-        //     for (int i = 0; i < q_d.size(); ++i) {
-        //         // RAD2UNIT = 4096.0 / (PI * 2.0)
-        //         // std::round()를 사용하여 반올림
-        //         q_d_unit[i] = static_cast<int32_t>(std::round(q_d(i) * DynamixelSdkInterface::RAD2UNIT));
-        //     }
+        // 5. Dynamixel에 쓰기 (radian을 degree로 변환하여 writeGoalPositionsDeg 사용)
+        if (q_d.size() == static_cast<Eigen::Index>(dxl_state.position.size())) {
+            std::vector<double> q_d_deg(q_d.size());
+            for (int i = 0; i < q_d.size(); ++i) {
+                // radian을 degree로 변환
+                q_d_deg[i] = q_d(i) * 180.0 / DynamixelSdkInterface::PI;
+            }
             
-        //     if (!dxl_->writeGoalPositions(q_d_unit)) {
-        //         RCLCPP_WARN_THROTTLE(
-        //             this->get_logger(),
-        //             *this->get_clock(),
-        //             1.0,  // 1초마다 출력
-        //             "Failed to write goal positions to Dynamixel");
-        //     }
-        // }
+            if (!dxl_->writeGoalPositionsDeg(q_d_deg)) {
+                RCLCPP_WARN_THROTTLE(
+                    this->get_logger(),
+                    *this->get_clock(),
+                    1.0,  // 1초마다 출력
+                    "Failed to write goal positions to Dynamixel");
+            }
+        }
         
         rate.sleep();  // 여기서 다음 주기까지 블록
     }
@@ -165,6 +204,25 @@ void RobotArm::debugExternalTorque(const Eigen::VectorXd &tau_ext)
         ss.str().c_str());
 }
 
+void RobotArm::publishEndEffectorPosition(const DynamixelSdkInterface::State &state)
+{
+    if (!end_effector_position_pub_) return;
+
+    // external_torque_estimator를 통해 엔드 이펙터 위치 계산
+    Eigen::Vector3d position = estimator_.getEndEffectorPosition(state);
+
+    auto msg = geometry_msgs::msg::PointStamped();
+    msg.header.stamp = this->now();
+    msg.header.frame_id = "base_link";  // 또는 적절한 frame 이름
+
+    // Position
+    msg.point.x = position(0);
+    msg.point.y = position(1);
+    msg.point.z = position(2);
+
+    end_effector_position_pub_->publish(msg);
+}
+
 void RobotArm::publishJointState(const DynamixelSdkInterface::State &state)
 {
     if (!joint_state_pub_) return;
@@ -181,11 +239,11 @@ void RobotArm::publishJointState(const DynamixelSdkInterface::State &state)
         msg.name[i] = "joint_" + std::to_string(i + 1);
     }
 
-    // Position (radian)
+    // Position (degree)
     msg.position.resize(n);
     for (std::size_t i = 0; i < n; ++i) {
         msg.position[i] = static_cast<double>(state.position[i]) * 
-                          DynamixelSdkInterface::UNIT2RAD;
+                          DynamixelSdkInterface::UNIT2DEG;
     }
 
     // Velocity (rad/s)
@@ -219,5 +277,71 @@ void RobotArm::publishExternalTorque(const Eigen::VectorXd &tau_ext)
     }
 
     external_torque_pub_->publish(msg);
+}
+
+void RobotArm::publishExternalForce(const Eigen::VectorXd &f_ext)
+{
+    if (!external_force_pub_ || f_ext.size() == 0) return;
+
+    auto msg = std_msgs::msg::Float64MultiArray();
+    msg.data.resize(f_ext.size());
+    
+    for (int i = 0; i < f_ext.size(); ++i) {
+        msg.data[i] = f_ext(i);
+    }
+
+    external_force_pub_->publish(msg);
+}
+
+void RobotArm::publishJacobian(const Eigen::MatrixXd &J)
+{
+    if (!jacobian_pub_ || J.rows() == 0 || J.cols() == 0) return;
+
+    auto msg = std_msgs::msg::Float64MultiArray();
+    
+    // 행렬 크기 정보 설정 (row-major 순서)
+    msg.layout.dim.resize(2);
+    msg.layout.dim[0].label = "rows";
+    msg.layout.dim[0].size = static_cast<size_t>(J.rows());
+    msg.layout.dim[0].stride = static_cast<size_t>(J.rows() * J.cols());
+    msg.layout.dim[1].label = "cols";
+    msg.layout.dim[1].size = static_cast<size_t>(J.cols());
+    msg.layout.dim[1].stride = static_cast<size_t>(J.cols());
+    
+    // 행렬을 row-major 순서로 1차원 배열로 변환
+    msg.data.resize(static_cast<size_t>(J.rows() * J.cols()));
+    for (int i = 0; i < J.rows(); ++i) {
+        for (int j = 0; j < J.cols(); ++j) {
+            msg.data[static_cast<size_t>(i * J.cols() + j)] = J(i, j);
+        }
+    }
+
+    jacobian_pub_->publish(msg);
+}
+
+void RobotArm::moveToInitialPosition()
+{
+    if (!dxl_.has_value()) {
+        RCLCPP_ERROR(this->get_logger(), "Dynamixel interface not initialized");
+        return;
+    }
+
+    // 각 관절의 초기 위치 (degree 단위) - YAML 파일에서 로드
+    std::vector<double> initial_joint_positions_deg = 
+        this->get_parameter("initial_joint_positions").as_double_array();
+
+    if (initial_joint_positions_deg.size() != dxl_ids_all_.size()) {
+        RCLCPP_ERROR(this->get_logger(), 
+                    "Initial position size mismatch: expected %zu, got %zu",
+                    dxl_ids_all_.size(), initial_joint_positions_deg.size());
+        return;
+    }
+
+    RCLCPP_INFO(this->get_logger(), "Sending robot to initial position...");
+    if (dxl_->writeGoalPositionsDeg(initial_joint_positions_deg)) {
+        RCLCPP_INFO(this->get_logger(), "Initial position command sent successfully");
+    } else {
+        RCLCPP_ERROR(this->get_logger(), "Failed to send initial position command");
+    }
 }
 

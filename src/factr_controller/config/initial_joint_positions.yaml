@@ -1,0 +1,16 @@
+/**:
+  ros__parameters:
+    initial_joint_positions:
+      - 0.0  # joint 1 (theta1)
+      - -45.0  # joint 2 (theta2)
+      - 0.0  # joint 3 (theta3)
+      - -135.0  # joint 4 (theta4)
+      - 0.0  # joint 5 (theta5)
+      - 90.0  # joint 6 (theta6)
+      - 0.0  # joint 7 (theta7)
+    
+    reference_position:
+      x: 0.15  # reference x position (m)
+      y: 0.0   # reference y position (m)
+      z: 0.26   # reference z position (m)
+

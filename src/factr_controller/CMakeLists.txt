@@ -81,6 +81,14 @@ install(DIRECTORY include/
   DESTINATION include/
 )
 
+install(DIRECTORY config/
+  DESTINATION share/${PROJECT_NAME}/
+)
+
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/
+)
+
 #-------------------------------#
 # ament package
 #-------------------------------#

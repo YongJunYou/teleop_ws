@@ -29,6 +29,18 @@ public:
     // Get desired joint position (double integrated from acceleration)
     Eigen::VectorXd getDesiredJointPosition() const;
 
+    // Get current end-effector position (translation x, y, z in meters)
+    Eigen::Vector3d getEndEffectorPosition(const DynamixelSdkInterface::State &state) const;
+
+    // Set reference position (x, y, z in meters)
+    void setReferencePosition(double x, double y, double z);
+
+    // Get external force (6x1: 3 translational + 3 rotational)
+    Eigen::VectorXd getExternalForce() const;
+
+    // Get Jacobian matrix (6x7)
+    Eigen::MatrixXd getJacobian() const;
+
 private:
     void initializeModel();
     void computeJacobian(const Eigen::VectorXd &q);
@@ -48,30 +60,29 @@ private:
     Eigen::VectorXd x_;        // Task space position (6x1: 3 pos + 3 ori)
     Eigen::VectorXd x_dot_;    // Task space velocity (6x1)
     Eigen::VectorXd x_des_dot_dot_;  // Desired task space acceleration (6x1)
+    Eigen::VectorXd x0_;       // Reference task space position (6x1: 3 pos + 3 ori)
 
     // Joint space state
     Eigen::VectorXd q_;        // Joint position (current measured)
     Eigen::VectorXd q_dot_;    // Joint velocity (current measured)
-    Eigen::VectorXd theta_d_dot_dot_;  // Desired joint acceleration
+    Eigen::VectorXd q_dot_dot_des_;  // Desired joint acceleration
 
     // Desired joint states (integrated from acceleration)
     Eigen::VectorXd q_des_;        // Desired joint position (double integrated)
     Eigen::VectorXd q_dot_des_;   // Desired joint velocity (integrated)
-    Eigen::VectorXd theta_d_dot_dot_prev_;  // Previous acceleration for better integration
 
     // Jacobian and its time derivative
     Eigen::MatrixXd J_;        // Jacobian (6x7)
     Eigen::MatrixXd J_prev_;   // Previous Jacobian for computing J_dot
     Eigen::MatrixXd J_dot_;    // Time derivative of Jacobian (6x7)
     Eigen::MatrixXd J_pinv_;   // Pseudo-inverse of Jacobian (7x6)
+    Eigen::MatrixXd J_transpose_pinv_;   // Pseudo-inverse of Jacobian (6x7)
 
     // Previous state for computing derivatives
     Eigen::VectorXd q_prev_;
     Eigen::VectorXd x_prev_;
     bool first_update_;
 
-    // Integration state
-    bool integration_initialized_;
-
     Eigen::VectorXd last_external_torque_;
+    Eigen::VectorXd f_ext_;  // Task space force (6x1)
 };

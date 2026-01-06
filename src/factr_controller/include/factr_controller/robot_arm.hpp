@@ -4,6 +4,7 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <trajectory_msgs/msg/joint_trajectory.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
+#include <geometry_msgs/msg/point_stamped.hpp>
 
 #include "factr_controller/admittance_controller.hpp"
 #include "factr_controller/external_torque_estimator.hpp"
@@ -31,6 +32,9 @@ private:
     // ROS2 Publishers
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
     rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr external_torque_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr external_force_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr jacobian_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr end_effector_position_pub_;
 
     // 디버그용 헬퍼
     void debugDynamixelState(const DynamixelSdkInterface::State &state);
@@ -39,5 +43,11 @@ private:
     // Topic 발행 함수
     void publishJointState(const DynamixelSdkInterface::State &state);
     void publishExternalTorque(const Eigen::VectorXd &tau_ext);
+    void publishExternalForce(const Eigen::VectorXd &f_ext);
+    void publishJacobian(const Eigen::MatrixXd &J);
+    void publishEndEffectorPosition(const DynamixelSdkInterface::State &state);
+    
+    // 초기 위치로 이동
+    void moveToInitialPosition();
 };
 

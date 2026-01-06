@@ -26,8 +26,8 @@ DynamixelSdkInterface::DynamixelSdkInterface(
   }
   // ===== joint bounds (deg → unit) =====
   const double DEG2UNIT_LOCAL = DEG2UNIT;
-  std::vector<double> lower_deg = {-45, -90, -180,   0, -270, -180, -90};
-  std::vector<double> upper_deg = { 45, 105,  270, 120,  270,  -15,  90};
+  std::vector<double> lower_deg = {0, 0, 0, 0, 0, 0, 0};
+  std::vector<double> upper_deg = {359.99, 359.99, 359.99, 359.99, 359.99, 359.99, 359.99};
   lower_bound_unit_.resize(lower_deg.size());
   upper_bound_unit_.resize(upper_deg.size());
   for (std::size_t i = 0; i < lower_deg.size(); ++i) {
@@ -194,7 +194,7 @@ bool DynamixelSdkInterface::readOnce(State &out_state)
             id, addr_present_position_, len_present_position_)) {
       uint32_t raw = group_bulk_read_->getData(
           id, addr_present_position_, len_present_position_);
-      out_state.position[i] = static_cast<int32_t>(raw);
+      out_state.position[i] = static_cast<int32_t>(raw) - 2048; // 180도씩 다 빼주기
     } else {
       RCLCPP_WARN(logger_, "Position not available (ID=%d)", id);
     }
@@ -281,7 +281,7 @@ bool DynamixelSdkInterface::writeGoalPositionsDeg(
 
   std::vector<int32_t> goals_unit(goals_deg.size());
   for (std::size_t i = 0; i < goals_deg.size(); ++i) {
-    goals_unit[i] = static_cast<int32_t>(goals_deg[i] * DEG2UNIT);
+    goals_unit[i] = static_cast<int32_t>(goals_deg[i] * DEG2UNIT) + 2048;
   }
 
   return writeGoalPositions(goals_unit);

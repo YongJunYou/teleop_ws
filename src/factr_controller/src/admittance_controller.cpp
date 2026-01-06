@@ -21,39 +21,44 @@ AdmittanceController::AdmittanceController()
 , x_(Eigen::VectorXd::Zero(6))
 , x_dot_(Eigen::VectorXd::Zero(6))
 , x_des_dot_dot_(Eigen::VectorXd::Zero(6))
+, x0_(Eigen::VectorXd::Zero(6))
 , q_(Eigen::VectorXd::Zero(7))
 , q_dot_(Eigen::VectorXd::Zero(7))
-, theta_d_dot_dot_(Eigen::VectorXd::Zero(7))
 , q_des_(Eigen::VectorXd::Zero(7))
 , q_dot_des_(Eigen::VectorXd::Zero(7))
-, theta_d_dot_dot_prev_(Eigen::VectorXd::Zero(7))
+, q_dot_dot_des_(Eigen::VectorXd::Zero(7))
 , J_(Eigen::MatrixXd::Zero(6, 7))
 , J_prev_(Eigen::MatrixXd::Zero(6, 7))
 , J_dot_(Eigen::MatrixXd::Zero(6, 7))
+, J_transpose_pinv_(Eigen::MatrixXd::Zero(6, 7))
 , J_pinv_(Eigen::MatrixXd::Zero(7, 6))
-, q_prev_(Eigen::VectorXd::Zero(7))
-, x_prev_(Eigen::VectorXd::Zero(6))
 , first_update_(true)
-, integration_initialized_(false)
 , last_external_torque_(Eigen::VectorXd::Zero(7))
+, f_ext_(Eigen::VectorXd::Zero(6))
 {
     initializeModel();
 
     // Set default admittance parameters (can be tuned)
     // Md: desired mass matrix
     Md_.setIdentity();
-    Md_.block<3, 3>(0, 0) *= 1.0;  // translational mass
-    Md_.block<3, 3>(3, 3) *= 0.1;  // rotational mass
+    Md_.block<3, 3>(0, 0) *= 5.0;  // translational mass
+    Md_.block<3, 3>(3, 3) *= 100.0;  // rotational mass
 
     // Dd: desired damping matrix
     Dd_.setIdentity();
-    Dd_.block<3, 3>(0, 0) *= 50.0;  // translational damping
-    Dd_.block<3, 3>(3, 3) *= 5.0;   // rotational damping
+    Dd_.block<3, 3>(0, 0) *= 40.0;  // translational damping
+    Dd_.block<3, 3>(3, 3) *= 40.0;   // rotational damping
 
     // Kd: desired stiffness matrix
     Kd_.setIdentity();
-    Kd_.block<3, 3>(0, 0) *= 100.0;  // translational stiffness
-    Kd_.block<3, 3>(3, 3) *= 10.0;   // rotational stiffness
+    Kd_.block<3, 3>(0, 0) *= 500.0;  // translational stiffness
+    Kd_.block<3, 3>(3, 3) *= 500.0;   // rotational stiffness
+
+    // Reference position x0_ will be set via setReferencePosition() from ROS parameters
+    // or initialized from current end-effector position on first update
+    x0_.setZero(6);
+    // Position part (indices 0, 1, 2) and orientation part (indices 3, 4, 5) remain zero
+    // until explicitly set via setReferencePosition() or initialized from current pose
 }
 
 AdmittanceController::~AdmittanceController() = default;
@@ -78,8 +83,7 @@ void AdmittanceController::initializeModel()
         const int nv = model_.nv;
         q_.resize(model_.nq);
         q_dot_.resize(nv);
-        q_prev_.resize(model_.nq);
-        theta_d_dot_dot_.resize(nv);
+        q_dot_dot_des_.resize(nv);
         last_external_torque_.resize(nv);
 
         model_ready_ = true;
@@ -101,6 +105,8 @@ void AdmittanceController::computeJacobian(const Eigen::VectorXd &q)
 
     pinocchio::forwardKinematics(model_, data_, q);
     pinocchio::framesForwardKinematics(model_, data_, q);
+    pinocchio::computeJointJacobians(model_, data_, q);
+    pinocchio::updateFramePlacements(model_, data_); /// check
     pinocchio::getFrameJacobian(model_, data_, end_effector_frame_id_,
                                 pinocchio::LOCAL_WORLD_ALIGNED, J_);
 }
@@ -165,83 +171,73 @@ void AdmittanceController::update(const Eigen::VectorXd &external_torque,
     if (first_update_) {
         J_dot_.setZero();
         J_prev_ = J_;
-        x_prev_ = x_;
-        q_prev_ = q_;
-        first_update_ = false;
     } else {
-        // Finite difference approximation for J_dot
+        // Finite difference approximation for J_dot:
         // J_dot ≈ (J_current - J_prev) / dt
-        // More accurate would be: pinocchio::computeJointJacobiansTimeVariation
-        J_dot_ = (J_ - J_prev_) / dt;
+        // More accurate would be: pinocchio::computeJointJacobiansTimeVariation:
         J_prev_ = J_;
-    }
+    }:
 
-    // 4. Compute task space velocity: x_dot = J * q_dot
+    // 4. Compute task space velocity: x_dot = J * q_dot:
     x_dot_ = J_ * q_dot_;
-
+    :
     // 5. Convert external torque to task space force
-    // f_ext = J^{+T} * tau_ext
-    // Compute pseudo-inverse of J
-    Eigen::JacobiSVD<Eigen::MatrixXd> svd(J_, Eigen::ComputeThinU | Eigen::ComputeThinV);
+    // f_ext = J^{+T} * tau_ext:
+    // Compute pseudo-inverse of J:
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(
+        J_,
+        Eigen::ComputeThinU | Eigen::ComputeThinV);
+
     const double threshold = 1e-6;
     Eigen::VectorXd singular_values = svd.singularValues();
     const int n_sv = static_cast<int>(singular_values.size());
-    Eigen::MatrixXd S_inv = Eigen::MatrixXd::Zero(n_sv, n_sv);
-    for (int i = 0; i < n_sv; ++i) {
-        if (singular_values(i) > threshold) {
+
+    Eigen::MatrixXd S_inv =
+        Eigen::MatrixXd::Zero(n_sv, n_sv);
+
+    for (int i = 0; i < n_sv; ++i)
+    {
+        if (singular_values(i) > threshold)
+        {
             S_inv(i, i) = 1.0 / singular_values(i);
         }
     }
-    J_pinv_ = svd.matrixV() * S_inv * svd.matrixU().transpose();
 
-    // f_ext = J^{+T} * tau_ext
-    Eigen::VectorXd f_ext = J_pinv_.transpose() * external_torque;
+    J_pinv_ =
+        svd.matrixV() *
+        S_inv *
+        svd.matrixU().transpose();
+
+    f_ext_ = J_pinv_.transpose() * external_torque;
 
     // 6. Compute desired task space acceleration
-    // x_des_dot_dot = Md^-1 (f_ext - Dd * x_dot + Kd * x)
-    x_des_dot_dot_ = Md_.inverse() * (f_ext - Dd_ * x_dot_ + Kd_ * x_);
+    x_des_dot_dot_ = Md_.inverse() * (f_ext_ - Dd_ * x_dot_ - Kd_ * (x_ - x0_));
 
     // 7. Convert to desired joint acceleration
-    // theta_d_dot_dot = J^+ (x_des_dot_dot - J_dot * q_dot)
-    theta_d_dot_dot_ = J_pinv_ * (x_des_dot_dot_ - J_dot_ * q_dot_);
+    q_dot_dot_des_ = J_pinv_ * (x_des_dot_dot_ - J_dot_ * q_dot_);
 
-    // 8. Numerically integrate acceleration to get velocity and position
-    // Use trapezoidal rule for better numerical stability
-    if (!integration_initialized_) {
-        // Initialize with current measured state
+    // 8. Numerical integration
+    if (first_update_)
+    {
         q_des_ = q_;
-        q_dot_des_ = q_dot_;
-        theta_d_dot_dot_prev_ = theta_d_dot_dot_;
-        integration_initialized_ = true;
-    } else {
-        // Clamp dt to reasonable range for numerical stability
-        const double dt_clamped = std::max(1e-6, std::min(dt, 0.1));
-        
-        // Store previous velocity before updating
-        Eigen::VectorXd q_dot_des_prev = q_dot_des_;
-        
-        // Integrate velocity: v = v_prev + a_avg * dt
-        // Using trapezoidal rule: a_avg = (a_prev + a_current) / 2
-        Eigen::VectorXd a_avg = 0.5 * (theta_d_dot_dot_prev_ + theta_d_dot_dot_);
-        q_dot_des_ += a_avg * dt_clamped;
-        
-        // Integrate position: q = q_prev + v_avg * dt
-        // Using trapezoidal rule: v_avg = (v_prev + v_current) / 2
-        Eigen::VectorXd v_avg = 0.5 * (q_dot_des_prev + q_dot_des_);
-        q_des_ += v_avg * dt_clamped;
-        
-        // Store current acceleration for next iteration
-        theta_d_dot_dot_prev_ = theta_d_dot_dot_;
+        q_dot_des_ = Eigen::VectorXd::Zero(7);
+        first_update_ = false;
     }
+    else
+    {
+        Eigen::VectorXd q_dot_des_prev = q_dot_des_;
+        Eigen::VectorXd q_des_prev = q_des_;
 
-    // Store current state for next iteration
-    q_prev_ = q_;
-    x_prev_ = x_;
+        q_dot_des_ =
+            q_dot_des_prev + q_dot_dot_des_ * dt;
+        q_des_ =
+            q_des_prev + q_dot_des_ * dt;
+    }
 }
 
 Eigen::VectorXd AdmittanceController::getDesiredJointAcceleration() const
 {
-    return theta_d_dot_dot_;
+    return q_dot_dot_des_;
 }
 
 Eigen::VectorXd AdmittanceController::getDesiredJointVelocity() const
@@ -253,3 +249,140 @@ Eigen::VectorXd AdmittanceController::getDesiredJointPosition() const
 {
     return q_des_;
 }
+
+void AdmittanceController::setReferencePosition(double x, double y, double z)
+{
+    x0_(0) = x;
+    x0_(1) = y;
+    x0_(2) = z;
+}
+
+Eigen::VectorXd AdmittanceController::getExternalForce() const
+{
+    return f_ext_;
+}
+
+Eigen::MatrixXd AdmittanceController::getJacobian() const
+{
+    return J_;
+}
+
+Eigen::Vector3d AdmittanceController::getEndEffectorPosition(
+    const DynamixelSdkInterface::State &state) const
+{
+    if (!model_ready_)
+    {
+        return Eigen::Vector3d::Zero();
+    }
+
+    const std::size_t nv = model_.nv;
+    const std::size_t nmeas =
+        std::min<std::size_t>(nv, state.position.size());
+
+    if (nmeas == 0)
+    {
+        return Eigen::Vector3d::Zero();
+    }
+
+    Eigen::VectorXd q(model_.nq);
+
+    for (std::size_t i = 0; i < nmeas; ++i)
+    {
+        const auto idx = static_cast<Eigen::Index>(i);
+        q(idx) =
+            static_cast<double>(state.position[i]) *
+            DynamixelSdkInterface::UNIT2RAD;
+    }
+
+    pinocchio::Data data_temp(model_);
+    pinocchio::forwardKinematics(model_, data_temp, q);
+    pinocchio::framesForwardKinematics(model_, data_temp, q);
+
+    const pinocchio::SE3 &T_ee =
+        data_temp.oMf[end_effector_frame_id_];
+
+    return T_ee.translation();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
